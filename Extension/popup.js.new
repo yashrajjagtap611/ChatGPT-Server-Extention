@@ -1,0 +1,155 @@
+document.addEventListener('DOMContentLoaded', function() {
+  const serverUrl = 'http://localhost:3000';
+  
+  // Cache DOM elements
+  const loginForm = document.getElementById('login-form');
+  const afterLogin = document.getElementById('after-login');
+  const userView = document.getElementById('user-view');
+  const adminView = document.getElementById('admin-view');
+  const createUserForm = document.getElementById('create-user-form');
+  const loginStatus = document.getElementById('login-status');
+  
+  // Check if already logged in
+  chrome.storage.local.get(['token', 'userInfo'], function(result) {
+    if (result.token && result.userInfo) {
+      showLoggedInView(result.userInfo);
+    }
+  });
+
+  // Login handler
+  document.getElementById('login-btn').addEventListener('click', async () => {
+    const username = document.getElementById('username').value;
+    const password = document.getElementById('password').value;
+
+    try {
+      const response = await fetch(`${serverUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        chrome.storage.local.set({
+          token: data.token,
+          userInfo: data.user
+        }, () => {
+          showLoggedInView(data.user);
+        });
+        showStatus('Login successful!', 'success');
+      } else {
+        throw new Error(data.message || 'Login failed');
+      }
+    } catch (error) {
+      showStatus(error.message, 'error');
+    }
+  });
+
+  // Insert Cookies handler (for users)
+  document.getElementById('insert-cookies').addEventListener('click', async () => {
+    try {
+      const token = await getStoredToken();
+      const response = await fetch(`${serverUrl}/api/cookies/get`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch cookies');
+      
+      const cookies = await response.json();
+      await chrome.runtime.sendMessage({ type: 'SET_COOKIES', cookies });
+      
+      showStatus('Cookies inserted successfully!', 'success');
+    } catch (error) {
+      showStatus(error.message, 'error');
+    }
+  });
+
+  // Admin: Manage Users handler
+  document.getElementById('manage-users').addEventListener('click', () => {
+    adminView.style.display = 'none';
+    createUserForm.style.display = 'block';
+  });
+
+  // Admin: Create User handler
+  document.getElementById('save-user').addEventListener('click', async () => {
+    const username = document.getElementById('new-username').value;
+    const password = document.getElementById('new-password').value;
+
+    try {
+      const token = await getStoredToken();
+      const response = await fetch(`${serverUrl}/api/auth/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ username, password })
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        showStatus('User created successfully!', 'success');
+        document.getElementById('new-username').value = '';
+        document.getElementById('new-password').value = '';
+      } else {
+        throw new Error(data.message || 'Failed to create user');
+      }
+    } catch (error) {
+      showStatus(error.message, 'error');
+    }
+  });
+
+  // Back button handler
+  document.getElementById('back-to-admin').addEventListener('click', () => {
+    createUserForm.style.display = 'none';
+    adminView.style.display = 'block';
+  });
+
+  // Logout handler
+  document.querySelectorAll('#logout').forEach(button => {
+    button.addEventListener('click', () => {
+      chrome.storage.local.remove(['token', 'userInfo'], () => {
+        loginForm.style.display = 'block';
+        afterLogin.style.display = 'none';
+        userView.style.display = 'none';
+        adminView.style.display = 'none';
+        createUserForm.style.display = 'none';
+      });
+    });
+  });
+
+  // Helper functions
+  function showLoggedInView(userInfo) {
+    loginForm.style.display = 'none';
+    afterLogin.style.display = 'block';
+    document.getElementById('user-info').textContent = `Welcome, ${userInfo.username}!`;
+
+    if (userInfo.isAdmin) {
+      adminView.style.display = 'block';
+      userView.style.display = 'none';
+    } else {
+      userView.style.display = 'block';
+      adminView.style.display = 'none';
+    }
+  }
+
+  function showStatus(message, type) {
+    const status = document.createElement('div');
+    status.textContent = message;
+    status.className = `status ${type}`;
+    document.body.appendChild(status);
+    setTimeout(() => status.remove(), 3000);
+  }
+
+  async function getStoredToken() {
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.get(['token'], function(result) {
+        if (result.token) {
+          resolve(result.token);
+        } else {
+          reject(new Error('Not logged in'));
+        }
+      });
+    });
+  }
+});
